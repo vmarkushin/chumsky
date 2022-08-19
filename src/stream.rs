@@ -39,11 +39,11 @@ pub struct Stream<
     S: Span,
     Iter: Iterator<Item = (I, S)> + ?Sized = dyn Iterator<Item = (I, S)> + 'a,
 > {
-    pub(crate) phantom: PhantomData<&'a ()>,
-    pub(crate) eoi: S,
-    pub(crate) offset: usize,
-    pub(crate) buffer: Vec<(I, S)>,
-    pub(crate) iter: Iter,
+    pub phantom: PhantomData<&'a ()>,
+    eoi: S,
+    offset: usize,
+    buffer: Vec<(I, S)>,
+    iter: Iter,
 }
 
 /// A [`Stream`] that pulls tokens from a boxed [`Iterator`].
@@ -176,25 +176,25 @@ impl<'a, I: Clone, S: Span + 'a> BoxStream<'a, I, S> {
 }
 
 impl<'a, I: Clone, S: Span> Stream<'a, I, S> {
-    pub(crate) fn offset(&self) -> usize {
+    pub fn offset(&self) -> usize {
         self.offset
     }
 
-    pub(crate) fn save(&self) -> usize {
+    pub fn save(&self) -> usize {
         self.offset
     }
-    pub(crate) fn revert(&mut self, offset: usize) {
+    pub fn revert(&mut self, offset: usize) {
         self.offset = offset;
     }
 
-    fn pull_until(&mut self, offset: usize) -> Option<&(I, S)> {
+    pub fn pull_until(&mut self, offset: usize) -> Option<&(I, S)> {
         let additional = offset.saturating_sub(self.buffer.len()) + 1024;
         #[allow(deprecated)]
         (&mut &mut self.iter as &mut dyn StreamExtend<_>).extend(&mut self.buffer, additional);
         self.buffer.get(offset)
     }
 
-    pub(crate) fn skip_if(&mut self, f: impl FnOnce(&I) -> bool) -> bool {
+    pub fn skip_if(&mut self, f: impl FnOnce(&I) -> bool) -> bool {
         match self.pull_until(self.offset).cloned() {
             Some((out, _)) if f(&out) => {
                 self.offset += 1;
@@ -205,7 +205,7 @@ impl<'a, I: Clone, S: Span> Stream<'a, I, S> {
         }
     }
 
-    pub(crate) fn next(&mut self) -> (usize, S, Option<I>) {
+    pub fn next(&mut self) -> (usize, S, Option<I>) {
         match self.pull_until(self.offset).cloned() {
             Some((out, span)) => {
                 self.offset += 1;
@@ -215,7 +215,7 @@ impl<'a, I: Clone, S: Span> Stream<'a, I, S> {
         }
     }
 
-    pub(crate) fn span_since(&mut self, start_offset: usize) -> S {
+    pub fn span_since(&mut self, start_offset: usize) -> S {
         debug_assert!(
             start_offset <= self.offset,
             "{} > {}",
@@ -235,7 +235,7 @@ impl<'a, I: Clone, S: Span> Stream<'a, I, S> {
         S::new(self.eoi.context(), start..end)
     }
 
-    pub(crate) fn attempt<R, F: FnOnce(&mut Self) -> (bool, R)>(&mut self, f: F) -> R {
+    pub fn attempt<R, F: FnOnce(&mut Self) -> (bool, R)>(&mut self, f: F) -> R {
         let old_offset = self.offset;
         let (commit, out) = f(self);
         if !commit {
@@ -244,7 +244,7 @@ impl<'a, I: Clone, S: Span> Stream<'a, I, S> {
         out
     }
 
-    pub(crate) fn try_parse<O, E, F: FnOnce(&mut Self) -> PResult<I, O, E>>(
+    pub fn try_parse<O, E, F: FnOnce(&mut Self) -> PResult<I, O, E>>(
         &mut self,
         f: F,
     ) -> PResult<I, O, E> {

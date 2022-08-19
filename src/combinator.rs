@@ -6,6 +6,7 @@
 //! when accessed through their respective methods on [`Parser`].
 
 use super::*;
+use std::cell::Cell;
 
 /// See [`Parser::ignored`].
 pub type Ignored<P, O> = To<P, O, ()>;
@@ -372,6 +373,82 @@ impl<
         } {
             (mut first_errs, Ok((first_out, first_alt))) => {
                 let second_out = self.1(first_out);
+                match {
+                    #[allow(deprecated)]
+                    debugger.invoke(&second_out, stream)
+                } {
+                    (second_errs, Ok((second_out, second_alt))) => {
+                        first_errs.extend(second_errs);
+                        (first_errs, Ok((second_out, first_alt.or(second_alt))))
+                    }
+                    (second_errs, Err(e)) => {
+                        stream.revert(state);
+                        first_errs.extend(second_errs);
+                        (first_errs, Err(e))
+                    }
+                }
+            }
+            (errs, Err(e)) => {
+                stream.revert(state);
+                (errs, Err(e))
+            }
+        }
+    }
+
+    #[inline]
+    fn parse_inner_verbose(&self, d: &mut Verbose, s: &mut StreamOf<I, E>) -> PResult<I, O2, E> {
+        #[allow(deprecated)]
+        self.parse_inner(d, s)
+    }
+    #[inline]
+    fn parse_inner_silent(&self, d: &mut Silent, s: &mut StreamOf<I, E>) -> PResult<I, O2, E> {
+        #[allow(deprecated)]
+        self.parse_inner(d, s)
+    }
+}
+
+/// See [`Parser::then_with`]
+#[must_use]
+pub struct ThenWithOnce<I, O1, O2, A, B, F>(
+    pub(crate) A,
+    pub(crate) Cell<Option<F>>,
+    pub(crate) PhantomData<(I, O1, O2, B)>,
+);
+
+impl<I, O1, O2, A: Clone, B, F: Copy> Clone for ThenWithOnce<I, O1, O2, A, B, F> {
+    fn clone(&self) -> Self {
+        ThenWithOnce(self.0.clone(), self.1.clone(), PhantomData)
+    }
+}
+
+impl<
+        I: Clone,
+        O1,
+        O2,
+        A: Parser<I, O1, Error = E>,
+        B: Parser<I, O2, Error = E>,
+        F: FnOnce(O1) -> B,
+        E: Error<I>,
+    > Parser<I, O2> for ThenWithOnce<I, O1, O2, A, B, F>
+{
+    type Error = E;
+
+    #[inline]
+    fn parse_inner<D: Debugger>(
+        &self,
+        debugger: &mut D,
+        stream: &mut StreamOf<I, E>,
+    ) -> PResult<I, O2, E> {
+        let state = stream.save();
+
+        match {
+            #[allow(deprecated)]
+            debugger.invoke(&self.0, stream)
+        } {
+            (mut first_errs, Ok((first_out, first_alt))) => {
+                let mut cell = Cell::new(None);
+                self.1.swap(&cell);
+                let second_out = cell.take().unwrap()(first_out);
                 match {
                     #[allow(deprecated)]
                     debugger.invoke(&second_out, stream)
@@ -965,6 +1042,56 @@ impl<I: Clone, O, A: Parser<I, O, Error = E>, U, F: Fn(O) -> U, E: Error<I>> Par
         let (errors, res) = debugger.invoke(&self.0, stream);
 
         (errors, res.map(|(out, alt)| ((&self.1)(out), alt)))
+    }
+
+    #[inline]
+    fn parse_inner_verbose(&self, d: &mut Verbose, s: &mut StreamOf<I, E>) -> PResult<I, U, E> {
+        #[allow(deprecated)]
+        self.parse_inner(d, s)
+    }
+    #[inline]
+    fn parse_inner_silent(&self, d: &mut Silent, s: &mut StreamOf<I, E>) -> PResult<I, U, E> {
+        #[allow(deprecated)]
+        self.parse_inner(d, s)
+    }
+}
+
+/// See [`Parser::map`].
+#[must_use]
+pub struct MapOnce<A, F, O>(
+    pub(crate) A,
+    pub(crate) Cell<Option<F>>,
+    pub(crate) PhantomData<O>,
+);
+
+impl<A: Clone, F: Copy, O> Clone for MapOnce<A, F, O> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), self.1.clone(), PhantomData)
+    }
+}
+
+impl<I: Clone, O, A: Parser<I, O, Error = E>, U, F: FnOnce(O) -> U, E: Error<I>> Parser<I, U>
+    for MapOnce<A, F, O>
+{
+    type Error = E;
+
+    #[inline]
+    fn parse_inner<D: Debugger>(
+        &self,
+        debugger: &mut D,
+        stream: &mut StreamOf<I, E>,
+    ) -> PResult<I, U, E> {
+        #[allow(deprecated)]
+        let (errors, res) = debugger.invoke(&self.0, stream);
+
+        (
+            errors,
+            res.map(|(out, alt)| {
+                let mut cell = Cell::new(None);
+                self.1.swap(&cell);
+                ((cell.take().unwrap())(out), alt)
+            }),
+        )
     }
 
     #[inline]

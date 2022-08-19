@@ -1,7 +1,7 @@
 #![cfg_attr(feature = "nightly", feature(rustc_attrs))]
 #![cfg_attr(not(any(doc, feature = "std")), no_std)]
 #![doc = include_str!("../README.md")]
-#![deny(missing_docs)]
+// #![deny(missing_docs)]
 #![allow(deprecated)] // TODO: Don't allow this
 
 extern crate alloc;
@@ -42,6 +42,8 @@ use core::{
     str::FromStr,
 };
 
+use dyn_clone::{clone, DynClone};
+use std::cell::Cell;
 #[cfg(doc)]
 use std::{
     collections::HashMap,
@@ -81,13 +83,13 @@ enum ControlFlow<C, B> {
 // ([x, ...], Ok((out, alt_err)) => parsing failed, but recovery occurred so parsing may continue
 // ([...], Err(err)) => parsing failed, recovery failed, and one or more errors were produced
 // TODO: Change `alt_err` from `Option<Located<I, E>>` to `Vec<Located<I, E>>`
-type PResult<I, O, E> = (
+pub type PResult<I, O, E> = (
     Vec<Located<I, E>>,
     Result<(O, Option<Located<I, E>>), Located<I, E>>,
 );
 
 // Shorthand for a stream with the given input and error type.
-type StreamOf<'a, I, E> = Stream<'a, I, <E as Error<I>>::Span>;
+pub type StreamOf<'a, I, E> = Stream<'a, I, <E as Error<I>>::Span>;
 
 // [`Parser::parse_recovery`], but generic across the debugger.
 fn parse_recovery_inner<
@@ -296,6 +298,14 @@ pub trait Parser<I: Clone, O> {
         F: Fn(O) -> U,
     {
         Map(self, f, PhantomData)
+    }
+
+    fn map_once<U, F>(self, f: F) -> MapOnce<Self, F, O>
+    where
+        Self: Sized,
+        F: FnOnce(O) -> U,
+    {
+        MapOnce(self, Cell::new(Some(f)), PhantomData)
     }
 
     /// Map the output of this parser to another value, making use of the pattern's span when doing so.
@@ -673,6 +683,14 @@ pub trait Parser<I: Clone, O> {
         P: Parser<I, U, Error = Self::Error>,
     {
         ThenWith(self, other, PhantomData)
+    }
+
+    fn then_with_once<U, P, F: FnOnce(O) -> P>(self, other: F) -> ThenWithOnce<I, O, U, Self, P, F>
+    where
+        Self: Sized,
+        P: Parser<I, U, Error = Self::Error>,
+    {
+        ThenWithOnce(self, Cell::new(Some(other)), PhantomData)
     }
 
     /// Parse one thing and then another thing, attempting to chain the two outputs into a [`Vec`].
